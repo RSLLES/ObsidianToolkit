@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         scholar2obsidian
+// @name         Scholar2Obsidian
 // @namespace    http://tampermonkey.net/
-// @version      0.1
-// @description  Exports google scholar - cite as bibtex to Obsidian
+// @version      0.3
+// @description  Add an “Export to Obsidian” link on Google Scholar citation pages so you can import BibTeX directly into Obsidian.
 // @author       RSLLES
 // @match        https://scholar.googleusercontent.com/*
 // @grant        none
@@ -14,19 +14,14 @@ const folder = "papers";
 const tags = ["paper"];
 
 
-function addExportToObsidianLink() {
+// Create the “Export to Obsidian” link after the <pre> element that contains the BibTeX.
+function addExportLink() {
     // detect
-    const pre = document.querySelector('body > pre');
-    if (!pre) {
-        console.error("Can't detect bibtex entry.")
-        return false;
-    }
+    const pre = document.querySelector('pre');
+    if (!pre) return false;
     const bibtex = pre.textContent.trim();
     const entries = bibtexParse.toJSON(bibtex);
-    if (entries.length !== 1) {
-        console.error(`Only support one entry.`)
-        return false;
-    }
+    if (entries.length !== 1) return false;
     const bibentry = entries[0];
 
     // extract and format
@@ -39,7 +34,7 @@ function addExportToObsidianLink() {
     let year = metadata.year;
     year = year ? parseInt(year) : null;
 
-    // concat and encode
+    // concat
     let properties = {
         title: title,
         author: authors,
@@ -56,7 +51,7 @@ function addExportToObsidianLink() {
         content: [properties, pdf, cite].join("\n") + "\n\n",
     };
 
-    // export
+    // encode and export
     const link = document.createElement('a');
     const urlEncodedNote = encodeQueryParams(note);
     link.href = `obsidian://new?${urlEncodedNote}`;
@@ -66,7 +61,7 @@ function addExportToObsidianLink() {
     return true;
 }
 
-// Encode a dict of params to url
+// Encode a plain object as query‑string parameters.
 function encodeQueryParams(params) {
     return Object.keys(params)
         .map(key =>
@@ -75,56 +70,50 @@ function encodeQueryParams(params) {
         .join('&');
 }
 
-function parse_authors(authorsString) {
-    authorsString = authorsString.replace("and others", "");
-    authorsString = authorsString.replace(/\{\\[a-zA-Z]+\{([a-zA-Z])\}\}/g, '$1');
-    authorsString = authorsString.replace(/\{[^{}]*\}/g, (match) => {
-        return match.replace(/[^a-zA-Z]/g, '');
-    });
-    authorsString = safe_name(authorsString);
-    const authorsArray = authorsString
-        .split(" and ")
-        .map(author => {
-            const [lastname, firstname] = author.split(",").map(s => s.trim());
-            return `${firstname} ${lastname}`;
-        });
-    return authorsArray;
-}
-
+// Make a filename safe for Obsidian.
 // adapted from https://github.com/obsidianmd/obsidian-clipper/blob/6ec0864e161f56470ba40197a9fbf8fbedf7d81a/src/utils/filters/safe_name.ts#L1
 function safe_name(str) {
-    // Remove Obsidian-specific characters that should be sanitized across all platforms (and $)
+    // Remove Obsidian-specific characters
     str = str
         .replace(/[#\$|\^\[\]]/g, "")
         .replace(/[<>:"\/\\|?*:\x00-\x1F]/g, "")
         .replace(/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i, "_$1$2")
         .replace(/[\s.]+$/, "")
-        .replace(/^\./, "_");
-
-    // Common operations for all platforms
-    str = str
+        .replace(/^\./, "_")
         .replace(/^\.+/, "") // Remove leading periods
         .slice(0, 245); // Trim to leave room for ' 1.md'
 
-    // Ensure the file name is not empty
-    if (str.length === 0) {
-        str = "Untitled";
-    }
+    return str || 'Untitled';
+}
 
-    return str;
+// Clean and split an author string into an array.
+function parse_authors(str) {
+    str = str.replace("and others", "")
+        .replace(/\{\\[a-zA-Z]+\{([a-zA-Z])\}\}/g, '$1')
+        .replace(/\{[^{}]*\}/g, (match) => {
+            return match.replace(/[^a-zA-Z]/g, '');
+        });
+    str = safe_name(str);
+    const arr = str
+        .split(" and ")
+        .map(author => {
+            const [lastname, firstname] = author.split(",").map(s => s.trim());
+            return `${firstname} ${lastname}`;
+        });
+    return arr;
 }
 
 
+// Retry mechanism, retry every 100ms up to 5 seconds
 (function () {
     'use strict';
 
-    // If <pre> is not ready, retry every 100ms up to 5 seconds
-    if (!addExportToObsidianLink()) {
+    if (!addExportLink()) {
         let attempts = 0;
         const maxAttempts = 50;
         const interval = setInterval(() => {
             attempts++;
-            if (addExportToObsidianLink() || attempts >= maxAttempts) {
+            if (addExportLink() || attempts >= maxAttempts) {
                 clearInterval(interval);
                 if (attempts >= maxAttempts) console.log("Could not find <pre> element");
             }
